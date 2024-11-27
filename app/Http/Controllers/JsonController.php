@@ -2,14 +2,22 @@
 
 namespace App\Http\Controllers;
 
-use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Http\JsonResponse;
 
-class HelloWorldController extends Controller
+class JsonController extends Controller
 {
+    private function isValidJson($string)
+    {
+        json_decode($string);
+        return (json_last_error() == JSON_ERROR_NONE);
+    }
+
     /**
-     * Lista todos los ficheros de la carpeta storage/app.
+     * Lista todos los ficheros JSON de la carpeta storage/app.
+     * Se debe comprobar fichero a fichero si su contenido es un JSON válido.
+     * para ello, se puede usar la función json_decode y json_last_error.
      *
      * @return JsonResponse La respuesta en formato JSON.
      *
@@ -19,19 +27,37 @@ class HelloWorldController extends Controller
      */
     public function index()
     {
-        // Listar los archivos del disco 'local' en la carpeta raíz (storage/app)
-        $files = Storage::disk('local')->files();
+        try {
+            // Obtener todos los archivos en storage/app
+            $files = Storage::files('app');
+            $validJsonFiles = [];
 
-        // Devolver el JSON con el mensaje y los archivos
-        return response()->json([
-            'mensaje' => 'Listado de ficheros',
-            'contenido' => $files,
-        ], 200);
+            // Iterar sobre los archivos y validar si son JSON
+            foreach ($files as $file) {
+                $content = Storage::get($file);
+
+                // Comprobar si es un JSON válido
+                if ($this->isValidJson($content)) {
+                    $validJsonFiles[] = basename($file);
+                }
+            }
+
+            // Devolver la respuesta en formato JSON
+            return response()->json([
+                'mensaje' => 'Operación exitosa',
+                'contenido' => $validJsonFiles,
+            ], 200);
+        } catch (\Exception $e) {
+            return response()->json([
+                'mensaje' => 'Error al leer los archivos',
+            ], 500);
+        }
     }
 
-     /**
+    /**
      * Recibe por parámetro el nombre de fichero y el contenido. Devuelve un JSON con el resultado de la operación.
      * Si el fichero ya existe, devuelve un 409.
+     * Si el contenido no es un JSON válido, devuelve un 415.
      *
      * @param filename Parámetro con el nombre del fichero. Devuelve 422 si no hay parámetro.
      * @param content Contenido del fichero. Devuelve 422 si no hay parámetro.
@@ -56,18 +82,26 @@ class HelloWorldController extends Controller
             ], 422);
         }
 
+        // Validar si el contenido es un JSON válido
+        if (!$this->isValidJson($content)) {
+            return response()->json(['mensaje' => 'Contenido no es un JSON válido'], 415);
+        }
+
+        //Ruta de los archivos: storage/app/private/app
+        $path = "app/" . $filename;
+
         // Verificar si el archivo ya existe
-        if (Storage::disk('local')->exists($filename)) {
+        if (Storage::disk('local')->exists($path)) {
             return response()->json([
-                'mensaje' => 'El archivo ya existe',
+                'mensaje' => 'El fichero ya existe',
             ], 409);
         }
 
         // Guardar el archivo
         try {
-            Storage::disk('local')->put($filename, $content);
+            Storage::disk('local')->put($path, $content);
             return response()->json([
-                'mensaje' => 'Guardado con éxito',
+                'mensaje' => 'Fichero guardado exitosamente',
             ], 200);
         } catch (\Exception $e) {
             return response()->json([
@@ -76,7 +110,7 @@ class HelloWorldController extends Controller
         }
     }
 
-     /**
+    /**
      * Recibe por parámetro el nombre de fichero y devuelve un JSON con su contenido
      *
      * @param name Parámetro con el nombre del fichero.
@@ -86,20 +120,29 @@ class HelloWorldController extends Controller
      * - mensaje: Un mensaje indicando el resultado de la operación.
      * - contenido: El contenido del fichero si se ha leído con éxito.
      */
-    public function show(string $filename)
+    public function show(string $id)
     {
-        // Verificar si el archivo existe
-        if (!Storage::disk('local')->exists($filename)) {
+        if (!$id) {
             return response()->json([
-                'mensaje' => 'Archivo no encontrado',
+                'mensaje' => 'Faltan parámetros: filename es obligatorio',
+            ], 422);
+        }
+
+        //Ruta de los archivos: storage/app/private/app
+        $path = "app/" . $id;
+
+        // Verificar si el archivo existe
+        if (!Storage::disk('local')->exists($path)) {
+            return response()->json([
+                'mensaje' => 'El fichero no existe',
             ], 404);
         }
 
         // Leer el contenido del archivo
         try {
-            $content = Storage::disk('local')->get($filename);
+            $content = json_decode(Storage::disk('local')->get($path), true);
             return response()->json([
-                'mensaje' => 'Archivo leído con éxito',
+                'mensaje' => 'Operación exitosa',
                 'contenido' => $content,
             ], 200);
         } catch (\Exception $e) {
@@ -113,7 +156,8 @@ class HelloWorldController extends Controller
      * Recibe por parámetro el nombre de fichero, el contenido y actualiza el fichero.
      * Devuelve un JSON con el resultado de la operación.
      * Si el fichero no existe devuelve un 404.
-     *
+     * Si el contenido no es un JSON válido, devuelve un 415.
+     * 
      * @param filename Parámetro con el nombre del fichero. Devuelve 422 si no hay parámetro.
      * @param content Contenido del fichero. Devuelve 422 si no hay parámetro.
      * @return JsonResponse La respuesta en formato JSON.
@@ -121,7 +165,7 @@ class HelloWorldController extends Controller
      * El JSON devuelto debe tener las siguientes claves:
      * - mensaje: Un mensaje indicando el resultado de la operación.
      */
-    public function update(Request $request, string $filename)
+    public function update(Request $request, string $id)
     {
         // Validar que el contenido está presente
         try {
@@ -130,7 +174,7 @@ class HelloWorldController extends Controller
             ]);
             $content = $request->input('content');
 
-            if (!$filename) {
+            if (!$id) {
                 return response()->json([
                     'mensaje' => 'Faltan parámetros: filename es obligatorio'
                 ], 422);
@@ -141,18 +185,26 @@ class HelloWorldController extends Controller
             ], 422);
         }
 
+        // Validar si el contenido es un JSON válido
+        if (!$this->isValidJson($content)) {
+            return response()->json(['mensaje' => 'Contenido no es un JSON válido'], 415);
+        }
+
+        //Ruta de los archivos: storage/app/private/app
+        $path = "app/" . $id;
+
         // Verificar si el archivo existe
-        if (!Storage::disk('local')->exists($filename)) {
+        if (!Storage::disk('local')->exists($path)) {
             return response()->json([
-                'mensaje' => 'El archivo no existe',
+                'mensaje' => 'El fichero no existe',
             ], 404);
         }
 
         // Actualizar el contenido del archivo
         try {
-            Storage::disk('local')->put($filename, $content);
+            Storage::disk('local')->put($path, $content);
             return response()->json([
-                'mensaje' => 'Actualizado con éxito',
+                'mensaje' => 'Fichero actualizado exitosamente',
             ], 200);
         } catch (\Exception $e) {
             return response()->json([
@@ -171,26 +223,29 @@ class HelloWorldController extends Controller
      * El JSON devuelto debe tener las siguientes claves:
      * - mensaje: Un mensaje indicando el resultado de la operación.
      */
-    public function destroy(string $filename)
+    public function destroy(string $id)
     {
-        if (!$filename) {
+        if (!$id) {
             return response()->json([
                 'mensaje' => 'Faltan parámetros: filename es obligatorio',
             ], 422);
         }
 
+        //Ruta de los archivos: storage/app/private/app
+        $path = "app/" . $id;
+
         // Verificar si el archivo existe
-        if (!Storage::disk('local')->exists($filename)) {
+        if (!Storage::disk('local')->exists($path)) {
             return response()->json([
-                'mensaje' => 'El archivo no existe',
+                'mensaje' => 'El fichero no existe',
             ], 404);
         }
 
         // Eliminar el archivo
         try {
-            Storage::disk('local')->delete($filename);
+            Storage::disk('local')->delete($path);
             return response()->json([
-                'mensaje' => 'Eliminado con éxito',
+                'mensaje' => 'Fichero eliminado exitosamente',
             ], 200);
         } catch (\Exception $e) {
             return response()->json([
