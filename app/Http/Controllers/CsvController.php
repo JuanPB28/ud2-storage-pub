@@ -2,22 +2,15 @@
 
 namespace App\Http\Controllers;
 
+use App\Utils\CsvUtils;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Http\JsonResponse;
 
-class JsonController extends Controller
+class CsvController extends Controller
 {
-    private function isValidJson($string)
-    {
-        json_decode($string);
-        return (json_last_error() == JSON_ERROR_NONE);
-    }
-
     /**
-     * Lista todos los ficheros JSON de la carpeta storage/app.
-     * Se debe comprobar fichero a fichero si su contenido es un JSON válido.
-     * para ello, se puede usar la función json_decode y json_last_error.
+     * Lista todos los ficheros CSV de la carpeta storage/app.
      *
      * @return JsonResponse La respuesta en formato JSON.
      *
@@ -29,28 +22,28 @@ class JsonController extends Controller
     {
         try {
             // Obtener todos los archivos en storage/app
-            $files = Storage::files('app');
-            $validJsonFiles = [];
+            $files = Storage::disk('local')->allFiles();
+            $validCsvFiles = [];
 
-            // Iterar sobre los archivos y validar si son JSON
+            // Iterar sobre los archivos y validar si son CSV
             foreach ($files as $file) {
-                if (!pathinfo($file, PATHINFO_EXTENSION) === 'json') {
+                if (!pathinfo($file, PATHINFO_EXTENSION) === 'csv') {
                     continue;
                 }
 
-                // Comprobar si es un JSON válido
-                $content = Storage::get($file);
-                if (!$this->isValidJson($content)) {
+                // Comprobar si es un CSV válido
+                $content = Storage::disk('local')->get($file);
+                if (CsvUtils::decode($content) === false) {
                     continue;
                 }
-                
-                $validJsonFiles[] = basename($file);
+
+                $validCsvFiles[] = basename($file);
             }
 
             // Devolver la respuesta en formato JSON
             return response()->json([
                 'mensaje' => 'Operación exitosa',
-                'contenido' => $validJsonFiles,
+                'contenido' => $validCsvFiles,
             ], 200);
         } catch (\Exception $e) {
             return response()->json([
@@ -59,10 +52,10 @@ class JsonController extends Controller
         }
     }
 
-    /**
-     * Recibe por parámetro el nombre de fichero y el contenido. Devuelve un JSON con el resultado de la operación.
+   /**
+     * Recibe por parámetro el nombre de fichero y el contenido CSV y crea un nuevo fichero con ese nombre y contenido en storage/app. 
+     * Devuelve un JSON con el resultado de la operación.
      * Si el fichero ya existe, devuelve un 409.
-     * Si el contenido no es un JSON válido, devuelve un 415.
      *
      * @param filename Parámetro con el nombre del fichero. Devuelve 422 si no hay parámetro.
      * @param content Contenido del fichero. Devuelve 422 si no hay parámetro.
@@ -87,16 +80,13 @@ class JsonController extends Controller
             ], 422);
         }
 
-        // Validar si el contenido es un JSON válido
-        if (!$this->isValidJson($content)) {
-            return response()->json(['mensaje' => 'Contenido no es un JSON válido'], 415);
+        //Validar si el contenido es un CSV válido
+        if (CsvUtils::decode($content) === false) {
+            return response()->json(['mensaje' => 'Contenido no es un CSV válido'], 415);
         }
 
-        //Ruta de los archivos: storage/app/private/app
-        $path = "app/" . $filename;
-
         // Verificar si el archivo ya existe
-        if (Storage::disk('local')->exists($path)) {
+        if (Storage::disk('local')->exists($filename)) {
             return response()->json([
                 'mensaje' => 'El fichero ya existe',
             ], 409);
@@ -104,7 +94,7 @@ class JsonController extends Controller
 
         // Guardar el archivo
         try {
-            Storage::disk('local')->put($path, $content);
+            Storage::disk('local')->put($filename, $content);
             return response()->json([
                 'mensaje' => 'Fichero guardado exitosamente',
             ], 200);
@@ -116,9 +106,11 @@ class JsonController extends Controller
     }
 
     /**
-     * Recibe por parámetro el nombre de fichero y devuelve un JSON con su contenido
+     * Recibe por parámetro el nombre de un fichero CSV el nombre de fichero y devuelve un JSON con su contenido.
+     * Si el fichero no existe devuelve un 404.
+     * Hay que hacer uso lo visto en la presentación CSV to JSON.
      *
-     * @param name Parámetro con el nombre del fichero.
+     * @param name Parámetro con el nombre del fichero CSV.
      * @return JsonResponse La respuesta en formato JSON.
      *
      * El JSON devuelto debe tener las siguientes claves:
@@ -133,11 +125,8 @@ class JsonController extends Controller
             ], 422);
         }
 
-        //Ruta de los archivos: storage/app/private/app
-        $path = "app/" . $id;
-
         // Verificar si el archivo existe
-        if (!Storage::disk('local')->exists($path)) {
+        if (!Storage::disk('local')->exists($id)) {
             return response()->json([
                 'mensaje' => 'El fichero no existe',
             ], 404);
@@ -145,9 +134,10 @@ class JsonController extends Controller
 
         // Leer el contenido del archivo
         try {
-            $content = json_decode(Storage::disk('local')->get($path), true);
+            $content = CsvUtils::decode(Storage::disk('local')->get($id));
+
             return response()->json([
-                'mensaje' => 'Operación exitosa',
+                'mensaje' => 'Fichero leído con éxito',
                 'contenido' => $content,
             ], 200);
         } catch (\Exception $e) {
@@ -157,8 +147,8 @@ class JsonController extends Controller
         }
     }
 
-    /**
-     * Recibe por parámetro el nombre de fichero, el contenido y actualiza el fichero.
+   /**
+     * Recibe por parámetro el nombre de fichero, el contenido CSV y actualiza el fichero CSV. 
      * Devuelve un JSON con el resultado de la operación.
      * Si el fichero no existe devuelve un 404.
      * Si el contenido no es un JSON válido, devuelve un 415.
@@ -190,16 +180,13 @@ class JsonController extends Controller
             ], 422);
         }
 
-        // Validar si el contenido es un JSON válido
-        if (!$this->isValidJson($content)) {
-            return response()->json(['mensaje' => 'Contenido no es un JSON válido'], 415);
+        //Validar si el contenido es un CSV válido
+        if (CsvUtils::decode($content) === false) {
+            return response()->json(['mensaje' => 'Contenido no es un CSV válido'], 415);
         }
 
-        //Ruta de los archivos: storage/app/private/app
-        $path = "app/" . $id;
-
         // Verificar si el archivo existe
-        if (!Storage::disk('local')->exists($path)) {
+        if (!Storage::disk('local')->exists($id)) {
             return response()->json([
                 'mensaje' => 'El fichero no existe',
             ], 404);
@@ -207,7 +194,7 @@ class JsonController extends Controller
 
         // Actualizar el contenido del archivo
         try {
-            Storage::disk('local')->put($path, $content);
+            Storage::disk('local')->put($id, $content);
             return response()->json([
                 'mensaje' => 'Fichero actualizado exitosamente',
             ], 200);
@@ -218,7 +205,7 @@ class JsonController extends Controller
         }
     }
 
-    /**
+     /**
      * Recibe por parámetro el nombre de ficher y lo elimina.
      * Si el fichero no existe devuelve un 404.
      *
@@ -236,11 +223,8 @@ class JsonController extends Controller
             ], 422);
         }
 
-        //Ruta de los archivos: storage/app/private/app
-        $path = "app/" . $id;
-
         // Verificar si el archivo existe
-        if (!Storage::disk('local')->exists($path)) {
+        if (!Storage::disk('local')->exists($id)) {
             return response()->json([
                 'mensaje' => 'El fichero no existe',
             ], 404);
@@ -248,7 +232,7 @@ class JsonController extends Controller
 
         // Eliminar el archivo
         try {
-            Storage::disk('local')->delete($path);
+            Storage::disk('local')->delete($id);
             return response()->json([
                 'mensaje' => 'Fichero eliminado exitosamente',
             ], 200);
