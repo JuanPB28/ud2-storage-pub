@@ -10,7 +10,6 @@ Route::apiResource('hello', HelloWorldController::class);
 Route::apiResource('json', JsonController::class);
 Route::apiResource('csv', CsvController::class);
 
-
 Route::get('/hello', [HelloWorldController::class, 'index']);
 Route::post('/hello', [HelloWorldController::class, 'store']);
 Route::get('/hello/{filename}', [HelloWorldController::class, 'show']);
